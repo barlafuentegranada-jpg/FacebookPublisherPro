@@ -1,18 +1,23 @@
 from playwright.sync_api import TimeoutError
 
-from app.browser.browser_manager import browser
 from app.database.db import db
 
 
 class GroupAnalyzer:
 
     def analyze(self):
+        from app.browser.browser_manager import browser
 
-        page = browser.get_page()
+        return browser.analyze_groups()
 
-        groups = db.get_groups()
+    def analyze_page(self, page, account_id=None):
+
+        groups = db.get_groups(account_id=account_id)
 
         print(f"Analyzing {len(groups)} groups...")
+
+        analyzed = 0
+        failed = 0
 
         for group in groups:
 
@@ -77,14 +82,22 @@ class GroupAnalyzer:
                 print(title)
                 print(members)
                 print(privacy)
+                analyzed += 1
 
             except TimeoutError:
 
                 print("Timeout")
+                failed += 1
 
             except Exception as e:
 
                 print(e)
+                failed += 1
+
+        return {
+            "analyzed": analyzed,
+            "failed": failed,
+        }
 
 
 analyzer = GroupAnalyzer()

@@ -1,4 +1,3 @@
-from app.browser.browser_manager import browser
 from app.database.db import db
 from app.services.post_service import post_service
 
@@ -24,8 +23,6 @@ class Publisher:
 
         try:
 
-            page = browser.get_page()
-
             groups = db.get_selected_groups()
 
             print("=" * 60)
@@ -49,12 +46,7 @@ class Publisher:
                 # المرحلة الحالية:
                 # فقط افتح الجروب
 
-                page.goto(
-                    group["url"],
-                    wait_until="domcontentloaded"
-                )
-
-                page.wait_for_timeout(2000)
+                print("Publishing is not implemented yet.")
 
             print()
 

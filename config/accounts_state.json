@@ -1,0 +1,12 @@
+{
+  "active_account_id": 6,
+  "statuses": {
+    "5": {
+      "login_status": "Login required"
+    },
+    "6": {
+      "login_status": "Logged in",
+      "last_login": "2026-07-22 18:03:54"
+    }
+  }
+}

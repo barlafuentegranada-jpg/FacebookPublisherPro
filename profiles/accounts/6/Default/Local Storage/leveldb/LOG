@@ -1,0 +1,14 @@
+2026/07/22-21:03:47.345 3a9c Reusing MANIFEST C:\Users\hekma\OneDrive\سطح المكتب\FacebookPublisher\profiles\accounts\6\Default\Local Storage\leveldb/MANIFEST-000001
+2026/07/22-21:03:47.375 3a9c Recovering log #13
+2026/07/22-21:03:47.386 3a9c Reusing old log C:\Users\hekma\OneDrive\سطح المكتب\FacebookPublisher\profiles\accounts\6\Default\Local Storage\leveldb/000013.log 
+2026/07/22-21:07:48.317 3a9c Level-0 table #17: started
+2026/07/22-21:07:48.347 3a9c Level-0 table #17: 24572 bytes OK
+2026/07/22-21:07:48.357 3a9c Delete type=0 #13
+2026/07/22-21:07:48.365 3a9c Compacting 4@0 + 0@1 files
+2026/07/22-21:07:48.388 3a9c Generated table #18@0: 554 keys, 29464 bytes
+2026/07/22-21:07:48.389 3a9c Compacted 4@0 + 0@1 files => 29464 bytes
+2026/07/22-21:07:48.390 3a9c compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/07/22-21:07:48.392 3a9c Delete type=2 #7
+2026/07/22-21:07:48.392 3a9c Delete type=2 #10
+2026/07/22-21:07:48.392 3a9c Delete type=2 #14
+2026/07/22-21:07:48.393 3a9c Delete type=2 #17

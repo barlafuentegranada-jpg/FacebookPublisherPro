@@ -1,14 +1,18 @@
 from playwright.sync_api import TimeoutError
 
-from app.browser.browser_manager import browser
 from app.database.db import db
 
 
 class GroupScanner:
 
     def scan(self):
+        from app.browser.browser_manager import browser
 
-        page = browser.get_page()
+        return browser.scan_groups()
+
+    def scan_page(self, page, account_id=None):
+        if account_id is None:
+            raise RuntimeError("An active account is required before scanning groups.")
 
         print("Opening Groups page...")
 
@@ -81,8 +85,6 @@ class GroupScanner:
         # =====================================
 
         print("Extracting groups...")
-
-        db.clear_groups()
 
         links = page.eval_on_selector_all(
             "a[href*='/groups/']",
@@ -186,8 +188,8 @@ class GroupScanner:
             # Save
             # -------------------------
 
-            db.save_group(
-                account_id=1,
+            db.upsert_group(
+                account_id=account_id,
                 name=name,
                 url=url,
                 members=""
@@ -200,6 +202,11 @@ class GroupScanner:
         print("-" * 50)
         print(f"Unique groups saved : {saved}")
         print("-" * 50)
+
+        return {
+            "saved": saved,
+            "links_found": len(links),
+        }
 
 
 scanner = GroupScanner()
