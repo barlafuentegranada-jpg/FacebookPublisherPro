@@ -1,15 +1,30 @@
+# Virtual environments
 venv/
 .venv/
+
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 
-.idea/
+# IDE
 .vscode/
+.idea/
 
+# Database
+*.db
 data/*.db
+
+# Logs
+logs/
+*.log
+
+# Environment
 .env
 
+# Build
 dist/
 build/
+
+# Playwright
+playwright/.cache/
