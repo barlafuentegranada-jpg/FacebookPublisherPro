@@ -1,0 +1,15 @@
+customtkinter==6.0.0
+darkdetect==0.8.0
+et_xmlfile==2.0.0
+greenlet==3.5.3
+numpy==2.5.1
+openpyxl==3.1.5
+packaging==26.2
+pandas==3.0.3
+pillow==12.3.0
+playwright==1.61.0
+pyee==13.0.1
+python-dateutil==2.9.0.post0
+six==1.17.0
+typing_extensions==4.16.0
+tzdata==2026.3
