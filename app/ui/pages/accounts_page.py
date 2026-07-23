@@ -9,7 +9,9 @@ from app.ui.widgets import (
     PrimaryButton,
     SectionPanel,
     SectionTitle,
+    SelectBox,
     StatusBadge,
+    TextInput,
 )
 
 
@@ -22,6 +24,7 @@ class AccountsPage(ctk.CTkFrame):
 
         self.controller = controller or AccountsController()
         self.on_accounts_changed = on_accounts_changed
+        self.platform_var = ctk.StringVar(value="Facebook")
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -48,7 +51,7 @@ class AccountsPage(ctk.CTkFrame):
 
         SectionTitle(
             toolbar,
-            text="Facebook Accounts",
+            text="Social Accounts",
         ).grid(
             row=0,
             column=0,
@@ -60,13 +63,25 @@ class AccountsPage(ctk.CTkFrame):
         self.status = StatusBadge(toolbar, text="Ready", variant="neutral")
         self.status.grid(row=0, column=1, padx=styles.Spacing.SM)
 
+        self.platform_select = SelectBox(
+            toolbar,
+            values=["Facebook", "Instagram", "Telegram"],
+            variable=self.platform_var,
+        )
+        self.platform_select.grid(
+            row=0,
+            column=2,
+            padx=(styles.Spacing.SM, styles.Spacing.SM),
+            pady=styles.Padding.FRAME_Y,
+        )
+
         PrimaryButton(
             toolbar,
             text="Add Account",
             command=self._add_account,
         ).grid(
             row=0,
-            column=2,
+            column=3,
             padx=(styles.Spacing.SM, styles.Padding.FRAME_X),
             pady=styles.Padding.FRAME_Y,
         )
@@ -109,6 +124,8 @@ class AccountsPage(ctk.CTkFrame):
             ).grid(row=0, column=0, sticky="w", pady=styles.Spacing.MD)
             return
 
+        publishing = self.controller.active_context().get("publishing")
+
         for index, account in enumerate(accounts):
             AccountCard(
                 self.accounts_list,
@@ -119,10 +136,20 @@ class AccountsPage(ctk.CTkFrame):
                 on_open_browser=self._open_browser,
                 on_refresh_status=self._refresh_status,
                 on_reset_profile=self._reset_profile,
+                on_mark_available=self._mark_available_after_review,
                 on_remove=self._remove_account,
+                actions_disabled=publishing,
             ).grid(row=index, column=0, sticky="ew", pady=styles.Spacing.SM)
 
     def _add_account(self):
+        if self.platform_var.get() == "Telegram":
+            TelegramBotDialog(self, on_submit=self._create_telegram_bot)
+            return
+
+        if self.platform_var.get() == "Instagram":
+            self._set_status("Coming in the next platform integration sprint.", "info")
+            return
+
         PromptDialog(
             self,
             title="Add Account",
@@ -132,8 +159,16 @@ class AccountsPage(ctk.CTkFrame):
 
     def _create_account(self, name):
         try:
-            self.controller.add_account(name)
+            self.controller.add_account(name, platform=self.platform_var.get().lower())
             self._set_status("Account added", "success")
+            self.refresh()
+        except Exception as error:
+            self._set_status(str(error), "danger")
+
+    def _create_telegram_bot(self, name, token):
+        try:
+            self.controller.add_telegram_bot(name, token)
+            self._set_status("Telegram bot connected", "success")
             self.refresh()
         except Exception as error:
             self._set_status(str(error), "danger")
@@ -160,6 +195,24 @@ class AccountsPage(ctk.CTkFrame):
         try:
             self.controller.set_active(account_id)
             self._set_status("Active account updated", "success")
+            self.refresh()
+        except Exception as error:
+            self._set_status(str(error), "danger")
+
+    def _mark_available_after_review(self, account_id):
+        confirmed = messagebox.askyesno(
+            "Confirm Facebook Review",
+            "Confirm that Facebook currently allows this account to publish again. "
+            "Only mark it available after reviewing Facebook Account Status and Support Inbox.",
+            parent=self,
+        )
+
+        if not confirmed:
+            return
+
+        try:
+            self.controller.mark_available_after_review(account_id, confirmed=True)
+            self._set_status("Account marked Available after review", "success")
             self.refresh()
         except Exception as error:
             self._set_status(str(error), "danger")
@@ -247,3 +300,70 @@ class AccountsPage(ctk.CTkFrame):
                 return account
 
         raise ValueError("Account not found.")
+
+
+class TelegramBotDialog(ctk.CTkToplevel):
+    def __init__(self, master, on_submit=None):
+        super().__init__(master)
+        self.on_submit = on_submit
+        self.title("Add Telegram Bot")
+        self.geometry("460x260")
+        self.resizable(False, False)
+        self.configure(fg_color=colors.BACKGROUND)
+        self.grab_set()
+        self.grid_columnconfigure(0, weight=1)
+
+        from app.ui.widgets import FieldLabel, SecondaryButton
+
+        FieldLabel(self, text="Bot display name").grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=styles.Padding.PAGE_X,
+            pady=(styles.Padding.PAGE_Y, styles.Spacing.XS),
+        )
+        self.name_input = TextInput(self)
+        self.name_input.grid(
+            row=1,
+            column=0,
+            sticky="ew",
+            padx=styles.Padding.PAGE_X,
+            pady=(styles.Radius.NONE, styles.Padding.FRAME_Y),
+        )
+
+        FieldLabel(self, text="Bot token").grid(
+            row=2,
+            column=0,
+            sticky="ew",
+            padx=styles.Padding.PAGE_X,
+            pady=(styles.Spacing.SM, styles.Spacing.XS),
+        )
+        self.token_input = TextInput(self, show="*")
+        self.token_input.grid(
+            row=3,
+            column=0,
+            sticky="ew",
+            padx=styles.Padding.PAGE_X,
+            pady=(styles.Radius.NONE, styles.Padding.FRAME_Y),
+        )
+
+        actions = ctk.CTkFrame(self, fg_color=colors.TRANSPARENT)
+        actions.grid(
+            row=4,
+            column=0,
+            sticky="e",
+            padx=styles.Padding.PAGE_X,
+            pady=(styles.Spacing.SM, styles.Padding.PAGE_Y),
+        )
+        SecondaryButton(actions, text="Cancel", command=self.destroy).grid(row=0, column=0, padx=(styles.Radius.NONE, styles.Spacing.SM))
+        PrimaryButton(actions, text="Connect", command=self._submit).grid(row=0, column=1)
+        self.name_input.focus_set()
+
+    def _submit(self):
+        name = self.name_input.get().strip()
+        token = self.token_input.get().strip()
+
+        if self.on_submit:
+            self.on_submit(name, token)
+
+        self.destroy()

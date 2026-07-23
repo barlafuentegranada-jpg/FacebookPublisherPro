@@ -21,6 +21,7 @@ logs/
 
 # Environment
 .env
+config/secrets.json
 
 # Build
 dist/

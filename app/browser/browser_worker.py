@@ -4,11 +4,29 @@ import queue
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
+
+
+class InvalidEnvironment(RuntimeError):
+    pass
+
+
+@dataclass
+class Environment:
+    browser: object = None
+    context: object = None
+    page: object = None
+    account_id: int = None
+    account_name: str = ""
+    profile_path: str = ""
+    playwright: object = None
+    worker_thread_id: int = None
+    generation_id: int = 0
 
 
 class BrowserWorker:
@@ -29,13 +47,18 @@ class BrowserWorker:
         self.started = threading.Event()
         self.lock = threading.Lock()
         self.busy_operation = None
+        self.environment = None
+        self.generation_id = 0
         self.state = {
             "running": False,
             "profile_path": "",
             "account_id": None,
             "account_name": None,
+            "generation_id": 0,
             "busy": False,
             "operation": "",
+            "owner_thread_id": None,
+            "publishing_active": False,
         }
         self.log_path = Path("logs/browser.log")
 
@@ -52,7 +75,31 @@ class BrowserWorker:
         self.start_thread()
 
         with self.lock:
+            if self.state.get("publishing_active") and operation != "publishing":
+                if operation == "close":
+                    self._log(
+                        "browser_close_blocked",
+                        "publishing_active=True",
+                    )
+                return self._result(
+                    False,
+                    operation,
+                    "Publishing is running. Stop it before switching accounts or restarting the browser.",
+                )
+
             if self.busy_operation:
+                if self.busy_operation == "publishing":
+                    if operation == "close":
+                        self._log(
+                            "browser_close_blocked",
+                            "publishing_active=True",
+                        )
+                    return self._result(
+                        False,
+                        operation,
+                        "Publishing is running. Stop it before switching accounts or restarting the browser.",
+                    )
+
                 return self._result(
                     False,
                     operation,
@@ -86,37 +133,23 @@ class BrowserWorker:
 
     def _run(self):
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        playwright = None
-        context = None
-        page = None
+        owner_thread_id = threading.get_ident()
+        self._set_state(owner_thread_id=owner_thread_id)
+        self.environment = None
         self.started.set()
 
         while True:
             operation, handler, result_queue = self.queue.get()
 
             if operation == "shutdown":
-                context, page = self._close_context(context)
-                if playwright:
-                    try:
-                        playwright.stop()
-                    except Exception:
-                        self._log_traceback("shutdown_stop_playwright")
-                playwright = None
-                self._set_state(running=False, account_id=None, account_name=None, profile_path="")
+                self._dispose_environment(source="shutdown")
+                self._set_state(running=False, account_id=None, account_name=None, profile_path="", generation_id=self.generation_id)
                 result_queue.put(self._result(True, operation, "Browser shutdown complete"))
                 self._clear_busy()
                 break
 
             try:
-                environment = {
-                    "playwright": playwright,
-                    "context": context,
-                    "page": page,
-                }
-                result = handler(environment)
-                playwright = environment.get("playwright")
-                context = environment.get("context")
-                page = environment.get("page")
+                result = handler()
                 result_queue.put(result)
             except (PlaywrightError, PlaywrightTimeoutError) as error:
                 self._log_traceback(operation)
@@ -127,27 +160,20 @@ class BrowserWorker:
             finally:
                 self._clear_busy()
 
-    def start_account_context(self, environment, account):
+    def switch_account(self, account):
         target_profile = str(Path(account["profile_path"]).resolve())
 
         if (
-            environment.get("context")
+            self.environment
+            and self._context_alive(self.environment.context)
             and self.state.get("profile_path") == target_profile
             and self.state.get("account_id") == account["id"]
         ):
             return self._result(True, "account switch", "Account already running", self.get_state())
 
-        environment["context"], environment["page"] = self._close_context(environment.get("context"))
-        self._set_state(running=False, account_id=None, account_name=None, profile_path="")
+        self._dispose_environment(source="switch_account")
 
-        if environment.get("playwright"):
-            try:
-                environment["playwright"].stop()
-            except Exception:
-                self._log_traceback("stop_playwright_before_switch")
-            environment["playwright"] = None
-
-        environment["playwright"] = sync_playwright().start()
+        playwright = sync_playwright().start()
         Path(target_profile).mkdir(parents=True, exist_ok=True)
 
         launch_options = {
@@ -160,53 +186,152 @@ class BrowserWorker:
         }
 
         try:
-            environment["context"] = environment["playwright"].chromium.launch_persistent_context(
+            context = playwright.chromium.launch_persistent_context(
                 channel="chrome",
                 **launch_options,
             )
         except Exception as error:
             self._log("chrome_launch_failed", str(error))
-            environment["context"] = environment["playwright"].chromium.launch_persistent_context(
+            context = playwright.chromium.launch_persistent_context(
                 **launch_options,
             )
 
-        pages = environment["context"].pages
-        environment["page"] = pages[0] if pages else environment["context"].new_page()
-        self._attach_diagnostics(environment["context"], environment["page"])
+        page = context.new_page()
+        page.goto("https://www.facebook.com/", wait_until="domcontentloaded", timeout=0)
+        self.generation_id += 1
+        self._log("browser_generation", f"generation={self.generation_id}")
+        self._attach_diagnostics(context, page)
+
+        self.environment = Environment(
+            browser=getattr(context, "browser", None),
+            context=context,
+            page=page,
+            account_id=account["id"],
+            account_name=account["name"],
+            profile_path=target_profile,
+            playwright=playwright,
+            worker_thread_id=threading.get_ident(),
+            generation_id=self.generation_id,
+        )
         self._set_state(
             running=True,
             profile_path=target_profile,
             account_id=account["id"],
             account_name=account["name"],
+            generation_id=self.generation_id,
         )
         return self._result(True, "account switch", "Account browser started", self.get_state())
 
-    def close_context(self, environment):
-        environment["context"], environment["page"] = self._close_context(environment.get("context"))
+    def ensure_page_for_account(self, account, required_generation=None):
+        if not self.environment or self.environment.account_id != account["id"]:
+            result = self.switch_account(account)
 
-        if environment.get("playwright"):
-            environment["playwright"].stop()
-            environment["playwright"] = None
+            if not result.get("success"):
+                raise RuntimeError(result.get("message") or "Could not switch account browser.")
 
-        self._set_state(running=False, account_id=None, account_name=None, profile_path="")
-        return self._result(True, "close", "Browser closed", self.get_state())
+            required_generation = self.generation_id
 
-    def require_page(self, environment):
-        page = environment.get("page")
+        return self.require_page(required_generation=required_generation)
 
-        if page is None:
-            raise RuntimeError("Browser is not running.")
+    def require_page(self, required_generation=None):
+        environment = self.environment
+        current_generation = self.generation_id
+        required = current_generation if required_generation is None else required_generation
+        self._log("require_page", f"required_generation={required} current_generation={current_generation}")
 
+        if required != current_generation:
+            raise InvalidEnvironment(
+                f"Browser environment generation changed: required={required} current={current_generation}"
+            )
+
+        if environment is None or environment.context is None:
+            raise InvalidEnvironment("Browser environment is not available.")
+
+        if not self._context_alive(environment.context):
+            raise InvalidEnvironment("Browser context is not available.")
+
+        page = environment.page
+
+        if page is None or page.is_closed():
+            raise InvalidEnvironment("Browser page is not available.")
+
+        self._log("ensure_page", "page_alive=True page_recreated=False")
         return page
 
-    def _close_context(self, context):
-        if context:
-            try:
-                context.close()
-            except Exception:
-                self._log_traceback("close_context")
+    def recover_page(self, required_generation=None):
+        environment = self.environment
+        current_generation = self.generation_id
+        required = current_generation if required_generation is None else required_generation
+        self._log("recover_page", f"required_generation={required} current_generation={current_generation}")
 
-        return None, None
+        if required != current_generation:
+            raise InvalidEnvironment(
+                f"Browser environment generation changed: required={required} current={current_generation}"
+            )
+
+        if environment is None or environment.context is None:
+            raise InvalidEnvironment("Browser environment is not available.")
+
+        if not self._context_alive(environment.context):
+            raise InvalidEnvironment("Browser context is not available.")
+
+        page = environment.page
+
+        if page is None or page.is_closed():
+            page = environment.context.new_page()
+            environment.page = page
+            self._attach_page_diagnostics(page)
+            self._log("ensure_page", "page_alive=True page_recreated=True")
+            return page
+
+        self._log("ensure_page", "page_alive=True page_recreated=False")
+        return page
+
+    def current_generation(self):
+        return self.generation_id
+
+    def set_publishing_active(self, active):
+        self._set_state(publishing_active=active)
+
+    def _context_alive(self, context):
+        if context is None:
+            return False
+
+        try:
+            context.pages
+            return True
+        except Exception:
+            return False
+
+    def _dispose_environment(self, source="unknown"):
+        if source not in {"shutdown", "switch_account"}:
+            raise RuntimeError(f"Environment disposal is not allowed from {source}.")
+
+        environment = self.environment
+        self.environment = None
+        self._set_state(running=False, account_id=None, account_name=None, profile_path="", generation_id=self.generation_id)
+        self._log("browser_close_requested", f"source={source}")
+
+        if environment:
+            if environment.page:
+                environment.page = None
+
+            context = environment.context
+            environment.context = None
+            environment.browser = None
+
+            if context:
+                try:
+                    context.close()
+                except Exception:
+                    self._log_traceback("dispose_context")
+
+            if environment.playwright:
+                try:
+                    environment.playwright.stop()
+                except Exception:
+                    self._log_traceback("stop_playwright")
+                environment.playwright = None
 
     def _attach_diagnostics(self, context, page):
         self._attach_page_diagnostics(page)

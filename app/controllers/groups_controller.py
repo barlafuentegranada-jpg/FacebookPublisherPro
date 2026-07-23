@@ -13,6 +13,7 @@ class GroupsController:
         self.filters = self.default_filters()
         self.sort_key = "name"
         self.sort_reverse = False
+        self.account_id = None
 
     def default_filters(self):
         return {
@@ -22,10 +23,25 @@ class GroupsController:
             "privacy": "All",
             "category": "All Categories",
             "selected": "All",
+            "status": "All",
         }
 
     def load(self):
-        self.groups = self.service.refresh_groups()
+        account = self.service.active_facebook_account()
+        new_account_id = account["id"] if account else None
+
+        if new_account_id != self.account_id:
+            self.account_id = new_account_id
+            self.groups = []
+            self.filtered_groups = []
+            self.filters = self.default_filters()
+
+        if self.account_id is None:
+            self.groups = []
+            self.filtered_groups = []
+            return []
+
+        self.groups = self.service.get_groups(self.account_id)
         return self.apply_filters(self.filters)
 
     def refresh(self):
@@ -41,65 +57,44 @@ class GroupsController:
 
     def apply_filters(self, filters):
         self.filters = filters.copy()
-        search = self.filters["search"].strip().lower()
-        privacy = self.filters["privacy"]
-        category = self.filters["category"]
-        selected = self.filters["selected"]
         min_members = self._to_int(self.filters["min_members"])
         max_members = self._to_int(self.filters["max_members"])
-
-        groups = []
-
-        for group in self.groups:
-            name = str(group.get("name") or "")
-            members_text = str(group.get("members") or "")
-            privacy_value = str(group.get("privacy") or "")
-            category_value = str(group.get("category") or "")
-            is_selected = bool(group.get("selected"))
-            members_count = self._members_count(group)
-
-            if search and search not in " ".join([name, members_text, privacy_value, category_value]).lower():
-                continue
-
-            if min_members is not None and members_count < min_members:
-                continue
-
-            if max_members is not None and members_count > max_members:
-                continue
-
-            if privacy != "All" and privacy_value.lower() != privacy.lower():
-                continue
-
-            if category != "All Categories" and category_value != category:
-                continue
-
-            if selected == "Selected Only" and not is_selected:
-                continue
-
-            if selected == "Unselected Only" and is_selected:
-                continue
-
-            groups.append(group)
+        groups = self.service.get_groups(
+            self.account_id,
+            search=self.filters["search"],
+            min_members=min_members,
+            max_members=max_members,
+            privacy=self.filters["privacy"],
+            category=self.filters["category"],
+            selection=self.filters["selected"],
+            status=self.filters["status"],
+        )
 
         self.filtered_groups = self._sort(groups)
         return self.filtered_groups
 
     def set_group_selected(self, group_id, selected):
-        self.service.set_selected(group_id, selected)
+        self.service.set_group_selected(group_id, self.account_id, selected)
 
         for group in self.groups:
             if group.get("id") == group_id:
                 group["selected"] = int(selected)
                 break
 
+        self.groups = self.service.get_groups(self.account_id)
         return self.apply_filters(self.filters)
 
-    def select_all(self):
-        self.service.set_all_selected(True)
-        return self.load()
+    def set_visible_selected(self, selected):
+        self.service.set_visible_selected(
+            self.account_id,
+            [group["id"] for group in self.filtered_groups],
+            selected,
+        )
+        self.groups = self.service.get_groups(self.account_id)
+        return self.apply_filters(self.filters)
 
-    def unselect_all(self):
-        self.service.set_all_selected(False)
+    def set_all_account_groups_selected(self, selected):
+        self.service.set_all_account_groups_selected(self.account_id, selected)
         return self.load()
 
     def sort_by(self, key):
@@ -115,26 +110,17 @@ class GroupsController:
     def export_csv(self, path):
         self.service.export_csv(path, self.filtered_groups)
 
+    def is_publishing(self):
+        return self.service.accounts_service.is_publishing()
+
     def categories(self):
-        values = {
-            str(group.get("category") or "").strip()
-            for group in self.groups
-            if str(group.get("category") or "").strip()
-        }
-        return ["All Categories"] + sorted(values)
+        return self.service.categories(self.account_id) if self.account_id else ["All Categories"]
 
     def summary(self):
-        total = len(self.filtered_groups)
-        selected = sum(1 for group in self.filtered_groups if group.get("selected"))
-        public = sum(1 for group in self.filtered_groups if str(group.get("privacy") or "").lower() == "public")
-        private = sum(1 for group in self.filtered_groups if str(group.get("privacy") or "").lower() == "private")
-
-        return {
-            "total": total,
-            "selected": selected,
-            "public": public,
-            "private": private,
-        }
+        return self.service.get_group_summary(
+            self.account_id,
+            filtered_group_ids=[group["id"] for group in self.filtered_groups],
+        )
 
     def _sort(self, groups):
         return sorted(

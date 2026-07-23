@@ -10,7 +10,7 @@ class Header(ctk.CTkFrame):
     def __init__(
         self,
         master,
-        title="Facebook Publisher",
+        title="Social Publisher",
         subtitle="UI v2",
         **kwargs
     ):

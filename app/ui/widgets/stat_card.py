@@ -7,12 +7,14 @@ class StatCard(ctk.CTkFrame):
     def __init__(self, master, title, value="0", caption="", **kwargs):
         super().__init__(
             master,
+            height=112,
             corner_radius=styles.CARD_RADIUS,
             fg_color=colors.SURFACE,
             border_color=colors.BORDER,
             border_width=styles.BORDER_WIDTH,
             **kwargs
         )
+        self.grid_propagate(False)
 
         self.grid_columnconfigure(0, weight=1)
 
@@ -22,6 +24,8 @@ class StatCard(ctk.CTkFrame):
             font=fonts.SMALL_BOLD,
             text_color=colors.TEXT_MUTED,
             anchor="w",
+            justify="left",
+            wraplength=180,
         )
         self.title_label.grid(
             row=0,

@@ -53,7 +53,7 @@ class GroupsManagerTable(ctk.CTkFrame):
             ("Privacy", "privacy"),
             ("Category", "category"),
             ("Last Scan", "last_scan"),
-            ("Status", "selected"),
+            ("Posting Status", "can_post"),
         ]
 
         for index, (title, key) in enumerate(columns):
@@ -98,12 +98,19 @@ class GroupsManagerTable(ctk.CTkFrame):
         for col_index, value in enumerate(values, start=1):
             TableText(
                 row,
-                text=str(value),
+                text=str(value)[:90] if col_index == 1 else str(value)[:40],
                 width=styles.GROUP_TABLE_COLUMNS[col_index][1],
             ).grid(row=0, column=col_index, padx=styles.Spacing.XS, sticky="w")
 
-        status_text = "Selected" if group.get("selected") else "Unselected"
-        status_variant = "info" if group.get("selected") else "neutral"
+        if group.get("can_post"):
+            status_text = "Can Post"
+            status_variant = "success"
+        elif group.get("can_post") == 0:
+            status_text = "Cannot Post"
+            status_variant = "danger"
+        else:
+            status_text = "Unknown"
+            status_variant = "neutral"
         StatusBadge(
             row,
             text=status_text,

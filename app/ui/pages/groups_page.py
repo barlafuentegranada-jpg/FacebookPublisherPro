@@ -22,8 +22,8 @@ from app.ui.widgets import (
 class GroupsPage(ctk.CTkFrame):
     """Presentation-only Groups Management page."""
 
-    route = "groups"
-    title = "Groups"
+    route = "facebook_groups"
+    title = "Facebook Groups"
 
     def __init__(self, master, controller=None, **kwargs):
         super().__init__(master, fg_color=colors.TRANSPARENT, **kwargs)
@@ -37,6 +37,7 @@ class GroupsPage(ctk.CTkFrame):
         self.privacy_var = ctk.StringVar(value=self.filters["privacy"])
         self.category_var = ctk.StringVar(value=self.filters["category"])
         self.selected_var = ctk.StringVar(value=self.filters["selected"])
+        self.status_var = ctk.StringVar(value=self.filters["status"])
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
@@ -87,22 +88,25 @@ class GroupsPage(ctk.CTkFrame):
 
         actions = [
             ("Refresh", self._refresh),
-            ("Scan", self._scan),
-            ("Analyze", self._analyze),
+            ("Scan Groups", self._scan),
+            ("Analyze Groups", self._analyze),
             ("Export CSV", self._export_csv),
         ]
+        self.action_buttons = {}
 
         for index, (label, command) in enumerate(actions, start=2):
-            SecondaryButton(
+            button = SecondaryButton(
                 self.toolbar,
                 text=label,
                 command=command,
-            ).grid(
+            )
+            button.grid(
                 row=0,
                 column=index,
                 padx=(styles.Radius.NONE, styles.Spacing.SM),
                 pady=styles.Padding.FRAME_Y,
             )
+            self.action_buttons[label] = button
 
     def _build_filter_panel(self):
         self.filter_panel = SectionPanel(self)
@@ -150,7 +154,7 @@ class GroupsPage(ctk.CTkFrame):
 
         self.privacy_select = SelectBox(
             self.filter_panel,
-            values=["All", "Public", "Private"],
+            values=["All", "Public", "Private", "Unknown"],
             variable=self.privacy_var,
         )
         self._field(column=2, label="Privacy", widget=self.privacy_select)
@@ -169,13 +173,20 @@ class GroupsPage(ctk.CTkFrame):
         )
         self._field(column=4, label="Selected", widget=self.selected_select)
 
+        self.status_select = SelectBox(
+            self.filter_panel,
+            values=["All", "Active", "Cannot Post", "Unknown"],
+            variable=self.status_var,
+        )
+        self._field(column=5, label="Status", widget=self.status_select)
+
         PrimaryButton(
             self.filter_panel,
             text="Apply Filters",
             command=self._apply_filters,
         ).grid(
             row=2,
-            column=5,
+            column=6,
             sticky="ew",
             padx=styles.Spacing.SM,
             pady=(styles.Spacing.SM, styles.Padding.FRAME_Y),
@@ -183,27 +194,44 @@ class GroupsPage(ctk.CTkFrame):
 
         SecondaryButton(
             self.filter_panel,
-            text="Select All",
-            command=self._select_all,
+            text="Clear Filters",
+            command=self._clear_filters,
         ).grid(
             row=2,
-            column=6,
+            column=7,
             sticky="ew",
             padx=(styles.Spacing.SM, styles.Padding.FRAME_X),
             pady=(styles.Spacing.SM, styles.Padding.FRAME_Y),
         )
 
+        bulk_panel = ctk.CTkFrame(self.filter_panel, fg_color=colors.TRANSPARENT)
+        bulk_panel.grid(row=3, column=0, columnspan=8, sticky="ew", padx=styles.Padding.FRAME_X, pady=(styles.Radius.NONE, styles.Padding.FRAME_Y))
+        for column in range(4):
+            bulk_panel.grid_columnconfigure(column, weight=1)
+
         SecondaryButton(
-            self.filter_panel,
-            text="Unselect All",
-            command=self._unselect_all,
-        ).grid(
-            row=2,
-            column=7,
-            sticky="ew",
-            padx=(styles.Radius.NONE, styles.Padding.FRAME_X),
-            pady=(styles.Spacing.SM, styles.Padding.FRAME_Y),
-        )
+            bulk_panel,
+            text="Select All Visible",
+            command=lambda: self._set_visible(True),
+        ).grid(row=0, column=0, sticky="ew", padx=styles.Spacing.SM)
+
+        SecondaryButton(
+            bulk_panel,
+            text="Unselect All Visible",
+            command=lambda: self._set_visible(False),
+        ).grid(row=0, column=1, sticky="ew", padx=styles.Spacing.SM)
+
+        SecondaryButton(
+            bulk_panel,
+            text="Select All Account Groups",
+            command=lambda: self._set_all_account(True),
+        ).grid(row=0, column=2, sticky="ew", padx=styles.Spacing.SM)
+
+        SecondaryButton(
+            bulk_panel,
+            text="Unselect All Account Groups",
+            command=lambda: self._set_all_account(False),
+        ).grid(row=0, column=3, sticky="ew", padx=styles.Spacing.SM)
 
     def _build_table(self):
         self.table_panel = SectionPanel(self)
@@ -251,17 +279,21 @@ class GroupsPage(ctk.CTkFrame):
             pady=(styles.Radius.NONE, styles.Padding.PAGE_Y),
         )
 
-        for column in range(4):
+        for column in range(6):
             self.summary_bar.grid_columnconfigure(column, weight=1)
 
-        self.total_card = StatCard(self.summary_bar, title="Total Groups")
-        self.selected_card = StatCard(self.summary_bar, title="Selected Groups")
+        self.total_card = StatCard(self.summary_bar, title="Total Account Groups")
+        self.filtered_card = StatCard(self.summary_bar, title="Filtered Groups")
+        self.selected_card = StatCard(self.summary_bar, title="Selected Account Groups")
+        self.selected_visible_card = StatCard(self.summary_bar, title="Selected Visible Groups")
         self.public_card = StatCard(self.summary_bar, title="Public Groups")
         self.private_card = StatCard(self.summary_bar, title="Private Groups")
 
         cards = [
             self.total_card,
+            self.filtered_card,
             self.selected_card,
+            self.selected_visible_card,
             self.public_card,
             self.private_card,
         ]
@@ -297,13 +329,16 @@ class GroupsPage(ctk.CTkFrame):
 
     def _load(self):
         groups = self.controller.load()
+        self._sync_filter_vars()
         self._sync_categories()
         self._render(groups)
+        self._sync_action_state()
 
     def _refresh(self):
         groups = self.controller.refresh()
         self._sync_categories()
         self._render(groups)
+        self._sync_action_state()
 
     def _scan(self):
         self.status.set_status("Scanning groups...", "info")
@@ -331,11 +366,16 @@ class GroupsPage(ctk.CTkFrame):
     def _set_group_selected(self, group_id, selected):
         self._render(self.controller.set_group_selected(group_id, selected))
 
-    def _select_all(self):
-        self._render(self.controller.select_all())
+    def _set_visible(self, selected):
+        self._render(self.controller.set_visible_selected(selected))
 
-    def _unselect_all(self):
-        self._render(self.controller.unselect_all())
+    def _set_all_account(self, selected):
+        self._render(self.controller.set_all_account_groups_selected(selected))
+
+    def _clear_filters(self):
+        self.filters = self.controller.default_filters()
+        self._sync_filter_vars()
+        self._render(self.controller.apply_filters(self.filters))
 
     def _sort_by(self, key):
         self._render(self.controller.sort_by(key))
@@ -348,6 +388,7 @@ class GroupsPage(ctk.CTkFrame):
             "privacy": self.privacy_var.get(),
             "category": self.category_var.get(),
             "selected": self.selected_var.get(),
+            "status": self.status_var.get(),
         }
 
     def _sync_categories(self):
@@ -360,14 +401,27 @@ class GroupsPage(ctk.CTkFrame):
     def _render(self, groups):
         self.groups_table.set_groups(groups)
         self._render_summary()
+        self._sync_action_state()
 
     def _render_summary(self):
         summary = self.controller.summary()
 
-        self.total_card.set_value(str(summary["total"]))
-        self.selected_card.set_value(str(summary["selected"]))
-        self.public_card.set_value(str(summary["public"]))
-        self.private_card.set_value(str(summary["private"]))
+        self.total_card.set_value(str(summary["total_account_groups"]))
+        self.filtered_card.set_value(str(summary["filtered_groups"]))
+        self.selected_card.set_value(str(summary["selected_account_groups"]))
+        self.selected_visible_card.set_value(str(summary["selected_visible_groups"]))
+        self.public_card.set_value(str(summary["public_groups"]))
+        self.private_card.set_value(str(summary["private_groups"]))
+
+    def _sync_filter_vars(self):
+        self.filters = self.controller.filters.copy()
+        self.search_var.set(self.filters["search"])
+        self.min_members_var.set(self.filters["min_members"])
+        self.max_members_var.set(self.filters["max_members"])
+        self.privacy_var.set(self.filters["privacy"])
+        self.category_var.set(self.filters["category"])
+        self.selected_var.set(self.filters["selected"])
+        self.status_var.set(self.filters["status"])
 
     def _run_async(self, task, success_message):
         def target():
@@ -384,3 +438,12 @@ class GroupsPage(ctk.CTkFrame):
         self._sync_categories()
         self._render(groups)
         self.status.set_status(message, variant)
+
+    def _sync_action_state(self):
+        publishing = self.controller.is_publishing()
+
+        for label in ["Scan Groups", "Analyze Groups"]:
+            button = self.action_buttons.get(label)
+
+            if button:
+                button.configure(state="disabled" if publishing else "normal")

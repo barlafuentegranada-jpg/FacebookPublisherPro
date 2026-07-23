@@ -45,7 +45,23 @@ class PostsService:
             "youtube_url": str(data.get("youtube_url") or "").strip(),
             "tags": str(data.get("tags") or "").strip(),
             "status": str(data.get("status") or "Draft").strip() or "Draft",
+            "supported_platforms": data.get("supported_platforms") or ["facebook"],
+            "platform_overrides": data.get("platform_overrides") or {},
+            "media_type": data.get("media_type") or self._media_type(data),
+            "metadata": data.get("metadata") or {},
         }
+
+    def _media_type(self, data):
+        if data.get("video_path"):
+            return "video"
+
+        if data.get("image_path"):
+            return "image"
+
+        if data.get("youtube_url"):
+            return "link"
+
+        return "text"
 
     def _validate(self, data):
         if data["status"] not in self.STATUSES:

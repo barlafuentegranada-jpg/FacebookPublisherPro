@@ -10,7 +10,10 @@ from app.ui.pages import (
     GroupsPage,
     HistoryPage,
     PostsPage,
+    PublishPage,
     SettingsPage,
+    TargetsPage,
+    TelegramPage,
 )
 from app.ui.theme import colors, styles
 
@@ -25,7 +28,7 @@ class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Facebook Publisher Pro - UI v2")
+        self.title("Social Publisher Pro - UI v2")
         self.geometry(f"{styles.WINDOW_WIDTH}x{styles.WINDOW_HEIGHT}")
         self.minsize(styles.MIN_WINDOW_WIDTH, styles.MIN_WINDOW_HEIGHT)
 
@@ -46,7 +49,7 @@ class MainWindow(ctk.CTk):
         self.header = Header(
             self,
             title="Dashboard",
-            subtitle="Facebook Publisher Pro",
+            subtitle="Social Publisher Pro",
         )
         self.header.grid(row=0, column=1, sticky="ew")
 
@@ -82,9 +85,19 @@ class MainWindow(ctk.CTk):
                     on_accounts_changed=self._refresh_account_context,
                 ),
             ),
-            ("groups", lambda: GroupsPage(self.page_container)),
+            ("facebook_groups", lambda: GroupsPage(self.page_container)),
+            ("targets", lambda: TargetsPage(self.page_container, on_manage_facebook_groups=lambda: self.navigate("facebook_groups"))),
+            ("telegram", lambda: TelegramPage(self.page_container)),
             ("posts", lambda: PostsPage(self.page_container)),
-            ("campaigns", lambda: CampaignsPage(self.page_container)),
+            (
+                "publish",
+                lambda: PublishPage(
+                    self.page_container,
+                    on_open_groups=lambda: self.navigate("facebook_groups"),
+                    on_open_targets=lambda: self.navigate("targets"),
+                ),
+            ),
+            ("campaigns", lambda: CampaignsPage(self.page_container, on_open_history=lambda: self.navigate("history"))),
             ("history", lambda: HistoryPage(self.page_container)),
             ("settings", lambda: SettingsPage(self.page_container)),
         ]
@@ -94,10 +107,11 @@ class MainWindow(ctk.CTk):
         for _route, factory in page_specs:
             page = factory()
             self.router.register(page.route, page)
+            title = "Targets" if page.route == "targets" else page.title
             nav_items.append(
                 {
                     "route": page.route,
-                    "title": page.title,
+                    "title": title,
                 }
             )
 
@@ -108,7 +122,7 @@ class MainWindow(ctk.CTk):
 
     def _on_route_changed(self, route, page):
         self.sidebar.set_active(route)
-        self.header.set_title(page.title, "Facebook Publisher Pro")
+        self.header.set_title(page.title, "Social Publisher Pro")
         if hasattr(page, "refresh"):
             page.refresh()
         self._refresh_account_context()
